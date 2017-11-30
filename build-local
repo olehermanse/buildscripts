@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+
+# Developer script for building CFEngine Enterprise
+# Does not copy to remote, and does not package
+
+set -e
+
+usage() {
+        echo
+        echo "Usage: build-local [options]"
+        echo
+        echo "Options:"
+        echo "-d ./workdir, --workdir=./workdir"
+        echo "        Specify directory which will be CFEngine's workdir."
+        echo "--source=<path>"
+        echo "        Where the git repositories are located. Default is pwd"
+        echo "--steps='step1 step2'"
+        echo "        What commands to execute (autogen,make,install)"
+        echo "--autogen"
+        echo "        Run autogen (once), alternative to --steps"
+        echo "--make"
+        echo "        Run make (once), alternative to --steps"
+        echo "--install"
+        echo "        Run make install (once), alternative to --steps"
+        echo "--release|--debug"
+        echo "        With or without debug symbols."
+        echo "-v, --verbose"
+        echo "        Whether or not to echo the log as the build progresses."
+        echo
+        echo "Build type defaults to DEBUG. You may request a RELEASE build using --release"
+        echo "Source defaults to current working directory (PWD)"
+        echo
+}
+
+opts() {
+    OPTS=`getopt -o d:vh --long workdir:source:,steps:,autogen,make,install,verbose,help,release,debug -n build-local -- "$@"`
+
+    eval set -- "$OPTS"
+    echo "$?"
+
+    if [ $? != 0 ]
+    then
+        usage
+        exit 1
+    fi
+
+    SOURCE=${PWD}
+    STEPS=''
+    BUILD_TYPE=DEBUG
+    DO_SOMETHING='no'
+    PREFIX='./workdir'
+    VERBOSE='no'
+    REPOS='core enterprise nova'
+
+    while true
+    do
+        case "$1" in
+            -d|--workdir)
+                PREFIX="$2"
+                shift 2;;
+            --source)
+                SOURCE="$2"
+                shift 2;;
+            --steps)
+                STEPS="$2"
+                DO_SOMETHING='yes'
+                shift 2;;
+            -v|--verbose)
+                VERBOSE=yes
+                shift;;
+            --autogen)
+                STEP_AUTOGEN=yes
+                DO_SOMETHING='yes'
+                shift;;
+            --make)
+                STEP_MAKE=yes
+                DO_SOMETHING='yes'
+                shift;;
+            --install)
+                STEP_INSTALL=yes
+                DO_SOMETHING='yes'
+                shift;;
+            -h|--help)
+                usage
+                exit 0;;
+            --release)
+                BUILD_TYPE=RELEASE
+                shift;;
+            --debug)
+                BUILD_TYPE=DEBUG
+                shift;;
+            --)
+                shift
+                break;;
+            *)
+                echo "Internal error!"
+                exit 1;;
+        esac
+    done
+    
+    PREFIX=$(readlink -f $PREFIX)
+    
+    echo "source: $SOURCE | workdir: $PREFIX"
+    echo "repos: $REPOS"
+    echo "verbose: $VERBOSE | build_type: $BUILD_TYPE"
+    
+    if [ "$DO_SOMETHING" = "no" ]
+    then
+        usage
+        echo
+        echo "Error: Use one of --steps, --autogen, --make, --install"
+        echo
+        exit 1
+    fi
+
+    export PREFIX SOURCE REPOS STEPS VERBOSE BUILD_TYPE STEP_AUTOGEN STEP_MAKE STEP_AUTOGEN
+}
+
+autogen_all() {
+    AUTOGEN_OPTIONS="--prefix $PREFIX"
+    if [ "$BUILD_TYPE" = "DEBUG" ]
+    then
+        AUTOGEN_OPTIONS="$AUTOGEN_OPTIONS --enable-debug"
+    fi
+    
+    cd ./core
+    ./autogen.sh $AUTOGEN_OPTIONS
+    cd ..
+
+    cd ./enterprise
+    ./autogen.sh $AUTOGEN_OPTIONS
+    cd ..
+}
+
+make_all() {
+    cd ./core
+    make -j2
+    cd ..
+
+    cd ./enterprise
+    make -j2
+    cd ..
+}
+
+install_all() {
+    cd ./core
+    make -j2 install
+    cd ..
+
+    cd ./enterprise
+    make -j2 install
+    cd ..
+}
+
+main() {
+    mkdir -p $PREFIX
+    for step in $(echo $STEPS)
+    do
+        if [ "$step" = "autogen" ]
+        then
+            autogen_all
+        fi
+        if [ "$step" = "make" ]
+        then
+            make_all
+        fi
+        if [ "$step" = "install" ]
+        then
+            install_all
+        fi
+    done
+    if [ "$STEP_AUTOGEN" = "yes" ]
+    then
+        autogen_all
+    fi
+    if [ "$STEP_MAKE" = "yes" ]
+    then
+        make_all
+    fi
+    if [ "$STEP_INSTALL" = "yes" ]
+    then
+        install_all
+    fi
+}
+
+opts "$@"
+cd $SOURCE
+main
