@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""CFEngine Enterprise build script - for humans"""
 
 import sys
 import os
